@@ -1,0 +1,194 @@
+<?xml version="1.0" encoding="UTF-8" ?>
+<project  xmlns:ivy="antlib:org.apache.ivy.ant" name="TelemetryAuto"
+	default="run_automation" basedir="./">
+	<taskdef resource="net/sf/antcontrib/antlib.xml" />
+	<property name="src" value="${TestName}/src" />
+	<property name="dst" value="${TestName}/classes" />
+	<property name="lib" value="conf/lib" />
+	<property name="log" value="${TestName}/log" />
+	<property name="testngReport" value="test-output" />
+
+
+	<!-- Resolve and retrieve libs by IVY -->
+
+	<target name="ivyresolve" description="--> retreive dependencies with ivy">
+	<property name="ivy.default.ivy.user.dir" value="${basedir}/ivy"/>
+
+		<ivy:settings id="ivy.mysettings" file="../ivy/ivysettings.xml" />
+
+		<ivy:resolve settingsRef="ivy.mysettings" file="../ivy/ivy.xml" useCacheOnly="false"/>
+
+		<ivy:retrieve pattern="${basedir}/conf/lib/[artifact](-[revision]).[ext]" />
+
+	</target>
+
+
+	<!-- Initialize compile env in "ant" folder -->
+	<target name="init" depends="ivyresolve">
+		<delete dir="${dst}" />
+		<delete dir="${TestName}/${testngReport}" />
+		<delete dir="${log}" />
+		<delete dir="${TestName}/conf" />
+		<delete dir="${TestName}/src" />
+		<delete dir="${TestName}/testdata" />
+
+
+		<mkdir dir="${dst}" />
+		<mkdir dir="${TestName}/${testngReport}" />
+		<mkdir dir="${log}" />
+		<mkdir dir="${TestName}/conf" />
+		<mkdir dir="${TestName}/src" />
+		<mkdir dir="${TestName}/testdata" />
+
+		<copy todir="${TestName}/src">
+			<fileset dir="../src" />
+		</copy>
+		<copy todir="${TestName}/conf">
+			<fileset dir="../conf" />
+		</copy>
+		<copy todir="${TestName}/testdata">
+			<fileset dir="../testdata" />
+		</copy>
+		
+		
+	
+		<!-- rewrite system.properties -->
+		<propertyfile file="${TestName}/conf/system.properties"
+			comment="Modified by Apache Ant">
+			<entry key="ManagerIP" value="${ManagerIP}" />
+			<entry key="ManagerUsername" value="${ManagerUsername}" />
+			<entry key="ManagerPassword" value="${ManagerPassword}" />
+			<entry key="DriverType" value="${DriverType}" />
+			
+			
+		</propertyfile>
+
+
+	</target>
+
+	<!-- Library -->
+	<path id="classes">
+		<fileset dir="${lib}" includes="*jar" />
+		<fileset dir="${lib}" includes="*zip" />
+		<pathelement location="${dst}" />
+	</path>
+	
+
+	<!-- Compile programm -->
+	<target name="compile" depends="init">
+		<javac srcdir="${src}" destdir="${dst}" classpathref="classes"
+			includeantruntime="off" debug="on" debuglevel="lines,vars,source"
+			encoding="cp1252" />
+	</target>
+	
+	<condition property="ifLinux">
+
+		<os family="unix" />
+
+	</condition>
+
+	<condition property="ifWindows">
+
+		<os family="windows" />
+
+	</condition>
+	
+
+	<!-- Juge operation system and invoke related automation testing -->
+	<target name="run_automation" depends="compile">
+		<antcall target="linux.first.run">
+		</antcall>
+		<antcall target="windows.first.run">
+		</antcall>
+	</target>
+
+	<!-- If linux platform, run following tasks -->
+	<target name="linux.first.run" if="ifLinux">
+		<!-- Linux first run -->
+		<exec executable="/bin/sh">
+			<arg value="-c" />
+			<arg
+				value="cd ${TestName}; java -classpath ../conf/lib/testng.jar:../conf/lib/*:./classes/ org.testng.TestNG -d ${testngReport} ../../testNgXML/${testngXML}" />
+		</exec>
+
+		<!-- Judge if need to re-run failed and skipped cases -->
+		<available file="${TestName}/${testngReport}/testng-failed.xml"
+			property="testng.failed" value="true" />
+		<condition property="testng_failed">
+			<equals arg1="${testng.failed}" arg2="true" />
+		</condition>
+		<antcall target="linux.second.run">
+		</antcall>
+	</target>
+
+	<!-- if linux platform, run testng again if the first run fails -->
+	<target name="linux.second.run" if="testng_failed">
+		<move file="${TestName}/${testngReport}/testng-results.xml"
+			tofile="${TestName}/${testngReport}/testng-results-1.xml" />
+		<trycatch>
+			<try>
+				<exec executable="/bin/sh">
+					<arg value="-c" />
+					<arg
+						value="cd ${TestName}; java -classpath ../conf/lib/testng.jar:../conf/lib/*:./classes/ org.testng.TestNG -d ${testngReport} ${testngReport}/testng-failed.xml" />
+				</exec>
+			</try>
+			<finally>
+				<move file="${TestName}/${testngReport}/testng-results.xml"
+					tofile="${TestName}/${testngReport}/testng-results-2.xml" />
+				<!-- combine the reports of the first and second run -->
+				<java classname="websense.httpgetpostauto.util.MergeTestngReports"
+					failonerror="yes" classpathref="classes">
+					<arg value="${TestName}/${testngReport}/testng-results-1.xml" />
+					<arg value="${TestName}/${testngReport}/testng-results-2.xml" />
+					<arg value="${TestName}/${testngReport}" />
+					<arg value="testng-results.xml" />
+				</java>
+			</finally>
+		</trycatch>
+	</target>
+
+	<!-- if windows platform, run following tasks -->
+	<target name="windows.first.run" if="ifWindows">
+		<!-- windows first run -->
+		<exec executable="cmd.exe">
+			<arg
+				line="/c cd ${TestName} &amp;&amp; java -classpath ..\conf\lib\testng.jar;..\conf\lib\*;.\classes\ org.testng.TestNG -d ${testngReport} ..\..\testNgXML\${testngXML}" />
+		</exec>
+
+		<!-- Judge if need to re-run failed and skipped cases -->
+		<available file="${TestName}/${testngReport}/testng-failed.xml"
+			property="testng.failed" value="true" />
+		<condition property="testng_failed">
+			<equals arg1="${testng.failed}" arg2="true" />
+		</condition>
+		<antcall target="windows.second.run">
+		</antcall>
+	</target>
+
+	<!-- if windows platform, run testng again if the first run fails -->
+	<target name="windows.second.run" if="testng_failed">
+		<move file="${TestName}/${testngReport}/testng-results.xml"
+			tofile="${TestName}/${testngReport}/testng-results-1.xml" />
+		<trycatch>
+			<try>
+				<exec executable="cmd.exe" failonerror="yes">
+					<arg
+						line="/c cd ${TestName} &amp;&amp; java -classpath ..\conf\lib\testng.jar;..\conf\lib\*;.\classes\ org.testng.TestNG -d ${testngReport} ${testngReport}\testng-failed.xml" />
+				</exec>
+			</try>
+			<finally>
+				<move file="${TestName}/${testngReport}/testng-results.xml"
+					tofile="${TestName}/${testngReport}/testng-results-2.xml" />
+				<!-- combine the reports of the first and second run -->
+				<java classname="websense.httpgetpostauto.util.MergeTestngReports"
+					failonerror="yes" classpathref="classes">
+					<arg value="${TestName}\${testngReport}\testng-results-1.xml" />
+					<arg value="${TestName}\${testngReport}\testng-results-2.xml" />
+					<arg value="${TestName}\${testngReport}" />
+					<arg value="testng-results.xml" />
+				</java>
+			</finally>
+		</trycatch>
+	</target>
+</project>
